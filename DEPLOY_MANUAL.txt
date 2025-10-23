@@ -1,0 +1,59 @@
+MANUAL EDGE FUNCTION DEPLOYMENT GUIDE
+======================================
+
+Step 1: Go to Supabase Dashboard
+---------------------------------
+URL: https://app.supabase.com
+Login → Select your project → Edge Functions (left sidebar)
+
+Step 2: Create Function
+------------------------
+1. Click "Create a new function"
+2. Function Name: create-employee
+3. Click "Create function"
+
+Step 3: Copy Code
+-----------------
+1. Open file: supabase\functions\create-employee\index.ts
+2. Copy ALL the code
+3. Paste into the Supabase online editor
+4. Click "Deploy"
+
+Step 4: Set Environment Variables
+----------------------------------
+1. Click on "create-employee" function
+2. Go to "Settings" tab
+3. Scroll to "Secrets"
+4. Add these two secrets:
+
+   Name: SUPABASE_URL
+   Value: https://YOUR-PROJECT-ID.supabase.co
+   (Get from: Settings → API → Project URL)
+
+   Name: SUPABASE_SERVICE_ROLE_KEY
+   Value: your-service-role-key-here
+   (Get from: Settings → API → service_role secret key)
+
+5. Click "Save"
+
+Step 5: Test Function
+---------------------
+Your function URL:
+https://YOUR-PROJECT-ID.supabase.co/functions/v1/create-employee
+
+Test with Postman or curl:
+POST https://YOUR-PROJECT-ID.supabase.co/functions/v1/create-employee
+Headers:
+  Content-Type: application/json
+  Authorization: Bearer YOUR-ANON-KEY
+
+Body (JSON):
+{
+  "email": "test@example.com",
+  "full_name": "Test User",
+  "department": "Engineering",
+  "position": "Software Engineer",
+  "role": "employee"
+}
+
+DONE! ✅

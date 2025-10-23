@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { Mail, Lock, LogIn, UserPlus } from 'lucide-react';
 
@@ -37,14 +37,27 @@ export default function Auth() {
         toast.success('Account created! Please check your email to verify.');
         setIsSignUp(false);
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
 
         if (error) throw error;
+
+        // Check user role
+        const { data: roleData } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', data.user.id)
+          .single();
+
+        if (roleData?.role === 'admin') {
+          navigate('/admin');
+        } else {
+          navigate('/employee');
+        }
+
         toast.success('Signed in successfully!');
-        navigate('/');
       }
     } catch (error: any) {
       toast.error(error.message || 'Authentication failed');

@@ -35,76 +35,86 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Check for existing Supabase session
+    let mounted = true;
+
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        // Fetch user role from database
-        const { data: roleData } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', session.user.id)
-          .single();
+      if (session?.user && mounted) {
+        try {
+          const [roleResult, profileResult] = await Promise.all([
+            supabase
+              .from('user_roles')
+              .select('role')
+              .eq('user_id', session.user.id)
+              .single(),
+            supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', session.user.id)
+              .single()
+          ]);
 
-        // Fetch user profile
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-
-        const supabaseUser: User = {
-          id: session.user.id,
-          email: session.user.email!,
-          role: roleData?.role || 'employee',
-          name: profileData?.full_name || session.user.user_metadata.full_name || session.user.email!.split('@')[0],
-          avatar: profileData?.avatar_url || session.user.user_metadata.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.email}`,
-          department: profileData?.department || session.user.user_metadata.department,
-          position: profileData?.position || session.user.user_metadata.position,
-        };
-        setUser(supabaseUser);
-        localStorage.setItem('user', JSON.stringify(supabaseUser));
+          if (mounted) {
+            const supabaseUser: User = {
+              id: session.user.id,
+              email: session.user.email!,
+              role: roleResult.data?.role || 'employee',
+              name: profileResult.data?.full_name || session.user.user_metadata.full_name || session.user.email!.split('@')[0],
+              avatar: profileResult.data?.avatar_url || session.user.user_metadata.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.email}`,
+              department: profileResult.data?.department || session.user.user_metadata.department,
+              position: profileResult.data?.position || session.user.user_metadata.position,
+            };
+            setUser(supabaseUser);
+            localStorage.setItem('user', JSON.stringify(supabaseUser));
+          }
+        } catch (error) {
+          console.error('Error loading user data:', error);
+        }
       }
-      setIsLoading(false);
+      if (mounted) setIsLoading(false);
     });
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        // Defer database calls to avoid deadlock
-        setTimeout(async () => {
-          // Fetch user role from database
-          const { data: roleData } = await supabase
-            .from('user_roles')
-            .select('role')
-            .eq('user_id', session.user.id)
-            .single();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user && mounted) {
+        try {
+          const [roleResult, profileResult] = await Promise.all([
+            supabase
+              .from('user_roles')
+              .select('role')
+              .eq('user_id', session.user.id)
+              .single(),
+            supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', session.user.id)
+              .single()
+          ]);
 
-          // Fetch user profile
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
-
-          const supabaseUser: User = {
-            id: session.user.id,
-            email: session.user.email!,
-            role: roleData?.role || 'employee',
-            name: profileData?.full_name || session.user.user_metadata.full_name || session.user.email!.split('@')[0],
-            avatar: profileData?.avatar_url || session.user.user_metadata.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.email}`,
-            department: profileData?.department || session.user.user_metadata.department,
-            position: profileData?.position || session.user.user_metadata.position,
-          };
-          setUser(supabaseUser);
-          localStorage.setItem('user', JSON.stringify(supabaseUser));
-        }, 0);
-      } else {
+          if (mounted) {
+            const supabaseUser: User = {
+              id: session.user.id,
+              email: session.user.email!,
+              role: roleResult.data?.role || 'employee',
+              name: profileResult.data?.full_name || session.user.user_metadata.full_name || session.user.email!.split('@')[0],
+              avatar: profileResult.data?.avatar_url || session.user.user_metadata.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.email}`,
+              department: profileResult.data?.department || session.user.user_metadata.department,
+              position: profileResult.data?.position || session.user.user_metadata.position,
+            };
+            setUser(supabaseUser);
+            localStorage.setItem('user', JSON.stringify(supabaseUser));
+          }
+        } catch (error) {
+          console.error('Error in auth state change:', error);
+        }
+      } else if (mounted) {
         setUser(null);
         localStorage.removeItem('user');
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const loginWithGoogle = async () => {

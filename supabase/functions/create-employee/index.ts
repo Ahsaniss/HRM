@@ -1,3 +1,4 @@
+// @deno-types="https://esm.sh/@supabase/supabase-js@2.39.3/dist/module/index.d.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3'
 
 const corsHeaders = {
@@ -11,9 +12,17 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Supabase automatically provides these environment variables 
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+      throw new Error('Missing Supabase environment variables')
+    }
+
     const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      supabaseUrl,
+      supabaseServiceKey,
       {
         auth: {
           autoRefreshToken: false,
@@ -22,12 +31,31 @@ Deno.serve(async (req) => {
       }
     )
 
-    const { email, full_name, department, position, role } = await req.json()
+    // Parse and validate request body
+    let body
+    try {
+      body = await req.json()
+    } catch (e) {
+      throw new Error('Invalid JSON in request body')
+    }
+
+    const { email, full_name, department, position, role } = body
+
+    // Validate required fields
+    if (!email || !full_name) {
+      throw new Error('Email and full name are required')
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(email)) {
+      throw new Error('Invalid email format')
+    }
 
     console.log('Creating employee:', { email, full_name, department, position, role })
 
-    // Generate a temporary password
-    const tempPassword = Math.random().toString(36).slice(-8) + 'A1!'
+    // Generate a secure temporary password
+    const tempPassword = crypto.randomUUID().slice(0, 12) + 'A1!'
 
     // Create the user in Supabase Auth
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -43,37 +71,66 @@ Deno.serve(async (req) => {
 
     if (authError) {
       console.error('Auth error:', authError)
-      throw authError
+      throw new Error(`Failed to create user: ${authError.message}`)
+    }
+
+    if (!authData || !authData.user) {
+      throw new Error('User creation failed: no user data returned')
     }
 
     console.log('User created in auth:', authData.user.id)
 
-    // Wait for trigger to create profile, then update with additional info
-    await new Promise(resolve => setTimeout(resolve, 1000))
-
+    // Create or update profile directly (don't rely on triggers)
     const { error: profileError } = await supabaseAdmin
       .from('profiles')
-      .update({
-        department,
-        position,
+      .upsert({
+        id: authData.user.id,
+        email: email,
+        full_name: full_name,
+        department: department || null,
+        position: position || null,
+        avatar_url: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'id'
       })
-      .eq('id', authData.user.id)
 
     if (profileError) {
-      console.error('Profile update error:', profileError)
-      // Don't throw - profile will be created by trigger, just won't have dept/position yet
+      console.error('Profile creation error:', profileError)
+      // Rollback: delete the auth user
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+      throw new Error(`Failed to create profile: ${profileError.message}`)
     }
 
-    // Assign role (employee role already assigned by trigger, but we might want admin)
-    if (role && role !== 'employee') {
-      const { error: roleError } = await supabaseAdmin
-        .from('user_roles')
-        .update({ role })
-        .eq('user_id', authData.user.id)
+    console.log('Profile created successfully')
 
-      if (roleError) {
-        console.error('Role update error:', roleError)
-      }
+    // Assign role
+    const userRole = role || 'employee'
+    
+    // Validate role
+    const validRoles = ['employee', 'manager', 'admin', 'hr']
+    if (!validRoles.includes(userRole)) {
+      throw new Error(`Invalid role: ${userRole}. Must be one of: ${validRoles.join(', ')}`)
+    }
+
+    const { error: roleError } = await supabaseAdmin
+      .from('user_roles')
+      .upsert({
+        user_id: authData.user.id,
+        role: userRole,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'user_id'
+      })
+
+    if (roleError) {
+      console.error('Role assignment error:', roleError)
+      // Rollback: delete the auth user and profile
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+      await supabaseAdmin.from('profiles').delete().eq('id', authData.user.id)
+      throw new Error(`Failed to assign role: ${roleError.message}`)
     }
 
     console.log('Role assigned successfully')
@@ -96,6 +153,7 @@ Deno.serve(async (req) => {
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred'
     return new Response(
       JSON.stringify({
+        success: false,
         error: errorMessage
       }),
       {
